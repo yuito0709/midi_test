@@ -3,7 +3,18 @@ import time
 
 # MIDIポートを開く
 midiout = rtmidi.MidiOut()
-midiout.open_port(1)  # ポート番号は環境に合わせて設定
+available_ports = midiout.get_ports()
+
+if available_ports:
+    port_number = 1  # 使用するポート番号を設定（0から始まる）
+    if port_number < len(available_ports):
+        midiout.open_port(port_number)
+    else:
+        print(f"指定したポート番号 {port_number} は利用できません。利用可能なポート: {available_ports}")
+        exit(1)
+else:
+    print("利用可能なMIDIポートが見つかりません。")
+    exit(1)
 
 # 文字列を16進数に変換（ASCIIコード）
 def text_to_hex(text):
@@ -39,10 +50,13 @@ def scroll_text(text, color=5, speed=10, loop=0):
 # 文字列をスクロール表示
 scroll_text("Hello World!", color=5, speed=10, loop=1)
 
-# スクロールを5秒間表示
+# スクロールを60秒間表示
 time.sleep(60)
 
 # スクロールを停止
 print("スクロール停止中...")
-midiout.send_message([0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x07, 0xF7])  # 停止コマンド
+stop_sysex_message = [0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x07, 0xF7]  # 停止コマンド
+midiout.send_message(stop_sysex_message)
+
+# ポートを閉じる
 midiout.close_port()
