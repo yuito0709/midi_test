@@ -48,7 +48,7 @@ def scroll_text(text, color=5, speed=10, loop=0):
     midiout.send_message(sysex_message)
 
 # 文字列をスクロール表示
-scroll_text("Hello World!", color=5, speed=10, loop=1)
+scroll_text("Hello World!", color=5, speed=1, loop=0)
 
 # スクロールを60秒間表示
 time.sleep(60)

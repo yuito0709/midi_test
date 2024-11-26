@@ -1,146 +1,86 @@
 import rtmidi
 import time
-import requests
-import sys
 
-# OpenWeatherMap API設定
-BASE_URL = "https://api.openweathermap.org/data/2.5/weather"
-API_KEY = "7f359a81aab2435659c50f7985f5e074"  # 取得したAPIキーをここに入力
-CITY = "Tokyo,jp"
+# Launchpad MiniのMIDIポート名を設定
+OUTPUT_PORT_NAME = 'Launchpad Mini MK3 LPMiniMK3 MIDI In'
 
-# MIDI設定
-midiout = rtmidi.MidiOut()
-available_ports = midiout.get_ports()
+# Launchpadの8x8ドットマトリックスに表示するパターン
+# 0: 消灯, 1: 赤, 2: 緑, 3: 青
+pattern = [
+    [1, 0, 0, 0, 0, 0, 0, 1],
+    [0, 1, 0, 0, 0, 0, 1, 0],
+    [0, 0, 1, 0, 0, 1, 0, 0],
+    [0, 0, 0, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 0, 0, 0],
+    [0, 0, 1, 0, 0, 1, 0, 0],
+    [0, 1, 0, 0, 0, 0, 1, 0],
+    [1, 0, 0, 0, 0, 0, 0, 1],
+]
 
-if available_ports:
-    port_number = 1  # 使用するポート番号を設定（0から始まる）
-    if port_number < len(available_ports):
-        midiout.open_port(port_number)
-        print(f"MIDIポート {available_ports[port_number]} を開きました。")
-    else:
-        print(f"指定したポート番号 {port_number} は利用できません。利用可能なポート: {available_ports}")
-        sys.exit(1)
-else:
-    print("利用可能なMIDIポートが見つかりません。")
-    sys.exit(1)
-
-# 天気状態と対応する色
-WEATHER_COLORS = {
-    "Clear": 9,    # 晴れ → オレンジ
-    "Clouds": 63,  # 曇り → 灰色
-    "Rain": 45,    # 雨 → 水色
-    "Snow": 15,    # 雪 → 白色
-    "Thunderstorm": 12,  # 雷雨 → 紫色
-    "Drizzle": 30,  # 霧雨 → 青色
-    "Mist": 24,     # 霧 → 薄青色
-    # その他の天気条件も必要に応じて追加
+# カラーパレットの定義 (MIDIのVelocity値)
+COLOR_PALETTE = {
+    0: 0,    # 消灯
+    1: 5,    # 赤
+    2: 21,   # 緑
+    3: 45,   # 青
 }
 
-# 文字列を16進数に変換（ASCIIコード）
-def text_to_hex(text):
-    return [ord(char) for char in text]
-
-# 文字列をスクロール表示する関数
-def scroll_text(text, color=5, speed=10, loop=0):
+def set_pad_color(output, x, y, color):
     """
-    Launchpad Mini [MK3]に文字を流す
-    :param text: 流す文字列（英数字のみ対応）
-    :param color: カラーパレット番号またはRGB指定 (例: 5 = 赤)
-    :param speed: スクロール速度 (例: 10)
-    :param loop: ループ設定 (0 = ループなし, 1 = ループあり)
+    特定のパッドの色を設定
+    :param output: MIDI出力ポート
+    :param x: X座標 (0-7)
+    :param y: Y座標 (0-7)
+    :param color: 色 (0: 消灯, 1: 赤, 2: 緑, 3: 青)
     """
-    # 色指定（パレットカラー）
-    colourspec = [0x00, color]  # パレットカラーを使用
-    # colourspec = [0x01, 127, 0, 0]  # RGBカラーの場合（例: 赤）
+    note = x + y * 10  # Launchpadのパッドノート番号計算
+    velocity = COLOR_PALETTE.get(color, 0)  # デフォルトで消灯
+    msg = [0x90, note, velocity]  # Note Onメッセージ
+    output.send_message(msg)
 
-    # テキストを16進数に変換
-    text_hex = text_to_hex(text)
+def display_pattern(output, pattern):
+    """
+    8x8パターンをLaunchpadに表示
+    :param output: MIDI出力ポート
+    :param pattern: 表示するパターン (8x8リスト)
+    """
+    for y, row in enumerate(pattern):
+        for x, color in enumerate(row):
+            set_pad_color(output, x, y, color)
 
-    # SysExメッセージを作成
-    sysex_message = (
-        [0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x07] +
-        [loop, speed] + colourspec + text_hex +
-        [0xF7]
-    )
+def switch_to_programmer_mode(output):
+    """
+    Launchpad MiniをProgrammer Modeに切り替えるSysExメッセージを送信
+    """
+    # Programmer Modeに切り替えるSysExメッセージ
+    sys_ex_message = [0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x0E, 0xF7]
+    output.send_message(sys_ex_message)
+    print("Switched to Programmer Mode")
 
-    # メッセージを送信
-    print(f"送信中: {sysex_message}")
-    midiout.send_message(sysex_message)
-
-# 天気情報を取得
-def get_weather():
-    try:
-        response = requests.get(f"{BASE_URL}?q={CITY}&appid={API_KEY}&lang=ja")
-        if response.status_code == 200:
-            data = response.json()
-            weather = data["weather"][0]["main"]
-            description = data["weather"][0]["description"]
-            print(f"現在の天気: {weather} ({description})")
-            return weather
-        else:
-            print(f"エラー: {response.status_code}, {response.text}")
-            return None
-    except Exception as e:
-        print(f"リクエスト中にエラーが発生しました: {e}")
-        return None
-
-# ボタンに色を設定
-def set_button_color(note, color):
-    try:
-        midiout.send_message([0x90, note, color])  # ノートオンメッセージ
-        print(f"ノート番号 {note} に色 {color} を設定しました。")
-    except Exception as e:
-        print(f"MIDIメッセージ送信エラー: {e}")
-
-# ボタンのテスト
-def test_buttons():
-    for note in range(36, 40):  # ノート番号 36～39 をテスト
-        set_button_color(note, 63)  # 灰色で点灯
-        time.sleep(0.5)  # 0.5秒間待機
-        set_button_color(note, 0)   # 消灯
-
-# Programmer mode に切り替え
-def switch_to_programmer_mode():
-    sysex_message = [0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x00, 0x05, 0xF7]
-    try: 
-        midiout.send_message(sysex_message)
-        print("Programmer mode に切り替えました。")
-    except Exception as e: 
-        print(f"MIDIメッセージ送信エラー: {e}")
-
-# メイン処理
 def main():
-    switch_to_programmer_mode()  # Programmer mode に切り替え
-    test_buttons()  # ボタンをテスト
-
-    weather = get_weather()
-    if weather:
-        # 天気に基づく色を設定
-        color = WEATHER_COLORS.get(weather, 0)  # デフォルトはオフ
-        # 天気の文字列をスクロール表示
-        scroll_text(weather, color=color, speed=10, loop=1)
-        # 必要に応じて他のボタンにも色を設定
-        # 例: ノート番号 36 に色を設定
-        set_button_color(36, color)
+    # MIDI出力ポートを開く
+    midi_out = rtmidi.MidiOut()
+    available_ports = midi_out.get_ports()
+    
+    # 適切なポート名を選択
+    if len(available_ports) > 0:
+        output_port = available_ports[0]  # 最初のポートを選択
+        midi_out.open_port(0)  # ポートを開く
     else:
-        # 天気情報が取得できなかった場合、エラーメッセージを表示
-        scroll_text("Error", color=12, speed=10, loop=0)
+        print("No available MIDI output ports.")
+        sys.exit()
 
-    # スクロールを60秒間表示
-    time.sleep(60)
+    # Programmer Modeに切り替え
+    switch_to_programmer_mode(midi_out)
 
-    # スクロールを停止
-    print("スクロール停止中...")
-    stop_sysex_message = [0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x07, 0xF7]  # 停止コマンド
-    midiout.send_message(stop_sysex_message)
+    # ドット絵パターンを表示
+    display_pattern(midi_out, pattern)
+    print("Pattern displayed. Press Ctrl+C to exit.")
 
-    # 全てのボタンを消灯
-    for note in range(36, 40):
-        set_button_color(note, 0)
+    time.sleep(10)  # 10秒間表示して終了
 
-    # ポートを閉じる
-    midiout.close_port()
-    print("MIDIポートを閉じました。")
+    # MIDIポートを閉じる
+    midi_out.close_port()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
